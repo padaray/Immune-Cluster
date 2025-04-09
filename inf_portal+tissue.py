@@ -207,6 +207,16 @@ class Algorithm():
         ############# Portal 和 Tissue 的 map #############
         portal_tissue_map = output_map.copy()
         
+        ############# 根據 output_map 快速取得 tissue binary map（含 portal）#############
+#         tissue_binary_map = ((portal_tissue_map == 1) | (portal_tissue_map == 2)).astype(np.uint8) * 255
+#         tissue_binary_map = cv2.resize(tissue_binary_map, 
+#                                        (tissue_binary_map.shape[1] * 2, tissue_binary_map.shape[0] * 2), 
+#                                        interpolation=cv2.INTER_NEAREST)
+
+#         tissue_binary_map_path = os.path.join(self.params['output_dir'], img_path.split('/')[-1].split('.')[0] + '_tissue_binary.png')
+#         cv2.imwrite(tissue_binary_map_path, tissue_binary_map)
+#         print(f"Tissue binary image saved (from output_map)!\n圖片大小: {tissue_binary_map.shape}")
+        
         ############# 只有 portal 區域的 map #############
         portal_only_map = portal_tissue_map.copy()
         portal_only_map[portal_only_map == 1] = 0

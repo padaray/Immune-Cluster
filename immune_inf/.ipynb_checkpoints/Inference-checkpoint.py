@@ -196,7 +196,6 @@ if __name__ == "__main__":
     print(f"🧭 實際使用的 patch level = {level}，對應實際倍率 ≈ {actual_patch_mag:.2f}x")
     ############################################################################
         
-#     print(f"Inference level is: {level}")
     data_params = {
         'wsi_path':     args.wsi_path,
         'pkl_path':     args.pkl_path,
@@ -233,7 +232,6 @@ if __name__ == "__main__":
     if args.inference_dir != None:
         os.makedirs(args.inference_dir, exist_ok=True)
 
-#     print("Model Load Success!")
     # ==========================================================================
         
     # 2. Load Model Weights=====================================================
@@ -254,7 +252,6 @@ if __name__ == "__main__":
         model.load_state_dict({k.replace('module.', ''): v 
                             for k, v in checkpoint['model_state_dict'].items()})
 
-#     print("Weight Load Success!")    
     model.to(device)
     # ==========================================================================
 
@@ -274,63 +271,62 @@ if __name__ == "__main__":
 
     # 4. Inference & Post-process===============================================
     cell_annos_results = []
-
-    for batch in tqdm(test_dataloader):
+    
+    for batch in tqdm(test_dataloader, total=len(test_dataloader)):
         imgs, patch_x, patch_y = batch
-        masks_preds = forward_step(model, imgs, device)
+        with torch.cuda.amp.autocast(enabled=False):
 
-        with ThreadPoolExecutor(max_workers=8) as executor:
-            results = executor.map(postprocess, imgs, patch_x, patch_y, masks_preds, repeat(level))
-            for annos, _, useful_mask, px, py in results:
-                cell_annos_results.append(annos)
-                global_mask[py:py+args.patch_size, px:px+args.patch_size] = useful_mask
+            masks_preds = forward_step(model, imgs, device)
 
-    downsample_factor = 2 ** (3 - level)
-    H3, W3 = global_mask.shape[0] // downsample_factor, global_mask.shape[1] // downsample_factor
-    global_mask_resized = cv2.resize(global_mask, (W3, H3), interpolation=cv2.INTER_NEAREST)
-    global_mask_resized = (global_mask_resized > 0).astype(np.uint8) * 255
+            with ThreadPoolExecutor(max_workers=1000) as e:
+                results = e.map(postprocess, imgs, patch_x, patch_y, masks_preds, repeat(level))
+                for annos, updated_mask, useful_mask, patch_x, patch_y in results:
+                    cell_annos_results.append(annos)
+                    global_mask[patch_y:patch_y+args.patch_size, patch_x:patch_x+args.patch_size] = useful_mask
+                    
+    # 儲存完整 WSI mask
+#     H2, W2 = global_mask.shape[0] // 4, global_mask.shape[1] // 4
+#     global_mask = cv2.resize(global_mask, (W2, H2), interpolation=cv2.INTER_NEAREST)
+#     global_mask = (global_mask > 0).astype(np.uint8) * 255
+    
+#     save_filename = f"{os.path.basename(args.wsi_path).split('.')[0]}_immune_binary.png"
+#     save_binary_path = os.path.join(args.inference_dir, save_filename)
+#     cv2.imwrite(save_binary_path, global_mask)
+
+#     print(f"Immune binary image save success!\n圖片大小: {global_mask.shape}")
+
+    level_used = 2
+    w, h = slide_os.level_dimensions[level_used]
+    global_mask = cv2.resize(global_mask, (w, h), interpolation=cv2.INTER_NEAREST)
+    global_mask = (global_mask > 0).astype(np.uint8) * 255
 
     save_filename = f"{os.path.basename(args.wsi_path).split('.')[0]}_immune_binary.png"
     save_binary_path = os.path.join(args.inference_dir, save_filename)
-    cv2.imwrite(save_binary_path, global_mask_resized)
-    print(f"Immune binary image save success!\n圖片大小: {global_mask_resized.shape}")
+    cv2.imwrite(save_binary_path, global_mask)
+    
+    print(f"Immune binary image save success!\n圖片大小: {global_mask.shape}")
+    
+
     # ==========================================================================
     
-    # 6. 疊加 global_mask_resized 到原圖縮圖（level 3 對應大小）===========
-    print("Generating overlay on WSI at level 3 resolution...")
+    # 5. 疊加 global_mask_resized 到原圖縮圖 ====================
+    print("Generating overlay on WSI at 10x resolution...")
 
-    level_used = 2  # 你指定使用 level 2（原本誤寫為 level 3）
-    slide_os = openslide.OpenSlide(args.wsi_path)
-    w, h = slide_os.level_dimensions[level_used]
-
-    # 使用 OpenSlide 讀取 Level 2 並轉換為 RGB → BGR 給 OpenCV 用
+    print(f"[INFO] Level 2 WSI 原始大小: width={w}, height={h}")
+    
     wsi_level_img = slide_os.read_region((0, 0), level_used, (w, h)).convert("RGB")
     wsi_level_np = np.array(wsi_level_img)
-    wsi_level_np = cv2.cvtColor(wsi_level_np, cv2.COLOR_RGB2BGR)  # 轉為 OpenCV 格式
-
-    # 檢查尺寸是否對齊，若不同就 resize 遮罩
-    if global_mask_resized.shape[:2] != wsi_level_np.shape[:2]:
-        print("Resize mask to match level image")
-        global_mask_resized = cv2.resize(global_mask_resized, (w, h), interpolation=cv2.INTER_NEAREST)
-
-    print(f"WSI level {level_used} image shape: {wsi_level_np.shape}")
+    wsi_level_np = cv2.cvtColor(wsi_level_np, cv2.COLOR_RGB2BGR)
     
-    # 建立紅色遮罩（OpenCV 是 BGR → 紅色 = [0, 0, 255]）
+    # 確保尺寸一致，不需 resize
+    assert global_mask.shape[:2] == wsi_level_np.shape[:2], "Mask and WSI dimensions do not match!"
+
     red_mask = np.zeros_like(wsi_level_np)
-    red_mask[global_mask_resized == 255] = [0, 0, 255]
+    red_mask[global_mask == 255] = [0, 0, 255]
 
-    # 疊加紅色遮罩
     overlay_result = cv2.addWeighted(wsi_level_np, 0.6, red_mask, 0.4, 0)
-
-    # 儲存結果
     overlay_out_path = os.path.join(args.inference_dir, f"{os.path.basename(args.wsi_path).split('.')[0]}_immune_overlay_lvl{level_used}.png")
     cv2.imwrite(overlay_out_path, overlay_result)
-    print("Overlay saved success!")
-    # =====================================================
-    
-    
-    # 5. Save Cells Annotations to JSON=========================================
-#     case_name = os.path.basename(args.wsi_path).split('.')[0]
-#     result_json_path = save2json(cell_annos_results, args.inference_dir,
-#                                  args.version, case_name)
-#     print(f"'{result_json_path}' Save Success!")
+    print(f"Overlay image save success!\n圖片大小: {overlay_result.shape}")
+    # ===========================================================
+
