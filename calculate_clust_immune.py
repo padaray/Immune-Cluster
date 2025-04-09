@@ -95,7 +95,7 @@ def generate_heatmap(points, labels, image_shape, original_image, output_path, w
         overlayed_image = apply_heatmap_overlay(original_image, heatmap_resized)
 
         # 儲存結果
-        output_filename = os.path.join(output_path, f"{os.path.basename(wsi_path).split('.')[0]}_clust_immune_binary.png")
+        output_filename = os.path.join(output_path, f"{os.path.basename(wsi_path).split('.')[0]}_heatmap.png")
         cv2.imwrite(output_filename, overlayed_image)
         print("generate_heatmap Success!")
 
@@ -121,7 +121,7 @@ def generate_filtered_overlay(original_image, filtered_map, output_path, wsi_pat
         overlay_output_path = os.path.join(output_path, f"{os.path.basename(wsi_path).split('.')[0]}_clust_immune_{suffix}.png")
         overlay_map = cv2.cvtColor(overlay_map, cv2.COLOR_BGR2RGB)
         cv2.imwrite(overlay_output_path, overlay_map)
-        print("generate_filtered_overlay Success!")
+        print(f"generate_{suffix}_overlay Success!")
         
     monitor_memory(inner_generate, "generate_filtered_overlay")
 # -----------------------------------------------------------

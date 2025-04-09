@@ -32,7 +32,6 @@ class Algorithm():
             "batch_size": args.batch_size,
             "output_type": args.output_type,
             "model_dir": args.model_dir,
-            "immune_model_dir": args.immune_model_dir,
             "output_dir": args.output_dir
         }
         
@@ -47,10 +46,6 @@ class Algorithm():
         self.params['net_portal_name'] = self.model_portal_info['params']['net_name']
 #         self.params['image_rate'] = "20x"
 #         self.params['net_portal_name'] = "MAnet"
-
-        self.model_immune_info = torch.load(self.params['immune_model_dir'])
-        print(f"immune model path： {self.params['immune_model_dir']}")
-        self.params['net_immune_name'] = "MAnet"
         
         ### outputs
         output_dir = self.params['output_dir'] #'./output'
@@ -61,7 +56,6 @@ class Algorithm():
         
         ### time
         time_now = time.localtime()
-        print(time_now)
         self.start_time = time.strftime('%Y%m%d_%H%M%S', time_now)
 
         
@@ -131,13 +125,12 @@ class Algorithm():
     def execute(self):
         
         self.model_portal = self.load_model(self.model_portal_info, self.params['net_portal_name'])
-        self.model_immune = self.load_model(self.model_immune_info, self.params['net_immune_name'])
 
         self.execute_a_slide(self.params['wsi_path'])
         
     def execute_a_slide(self, img_path):
         
-        print(f"正在讀取的是: {img_path}")
+        print(f"wsi path: {img_path}")
 
         self.patch_count = 0
         self.results_infos = {}
@@ -223,30 +216,9 @@ class Algorithm():
         portal_binary_map = cv2.resize(portal_binary_map, (portal_binary_map.shape[1] * 2, portal_binary_map.shape[0] * 2), interpolation=cv2.INTER_NEAREST)
         portal_binary_map_path = os.path.join(self.params['output_dir'], img_path.split('/')[-1].split('.')[0] + '_portal_binary.png')
         cv2.imwrite(portal_binary_map_path, portal_binary_map)
-        print(f"Portal binary image saved success!, \n圖片大小: {portal_binary_map.shape}")
+        print(f"Portal binary image save success!\n圖片大小: {portal_binary_map.shape}")
         
         # ------------------------------ 推論 組織區域 和 Portal 區域 ------------------------------
-
-
-        # **避免一次性讀取整張 WSI**
-#         chunk_size = 32768
-#         img_memmap = np.memmap('temp_image.dat', dtype=np.uint8, mode='w+', shape=(slide_h, slide_w, 3))
-        
-#         for y in tqdm(range(0, slide_h, chunk_size), desc="Processing Rows"):
-#             for x in range(0, slide_w, chunk_size):
-#                 img_data = portal_dataset.img_region.fetch(x, y, min(chunk_size, slide_w - x), min(chunk_size, slide_h - y))
-#                 img_chunk = np.frombuffer(img_data, dtype=np.uint8).reshape((min(chunk_size, slide_h - y), min(chunk_size, slide_w - x), portal_dataset.slide.bands))
-
-#                 if img_chunk.shape[2] >= 4:
-#                     img_chunk = img_chunk[:, :, :3]
-
-#                 img_memmap[y:y+img_chunk.shape[0], x:x+img_chunk.shape[1], :] = img_chunk
-
-#         img = np.array(img_memmap)
-
-#         if img.shape[2] >= 4:
-#             img = img[:, :, :3]
-
 
         img = np.zeros((slide_h, slide_w, 3), dtype=np.uint8)
         wsi_image = vi.Image.new_from_file(img_path, access="sequential")
@@ -264,17 +236,17 @@ class Algorithm():
         ### write result to img
         result_p = self.params['output_dir'] + '/' + img_path.split('/')[-1].split('.')[0]
 
-        # 著色並儲存每張 map
-        portal_tissue_colored = self.color_map(img, portal_tissue_map)
-        cv2.imwrite(result_p + '_portal_tissue.png', portal_tissue_colored)
-        print("print portal & tissue image success")
+#         # 著色並儲存每張 map
+#         portal_tissue_colored = self.color_map(img, portal_tissue_map)
+#         cv2.imwrite(result_p + '_portal_tissue.png', portal_tissue_colored)
+#         print("print portal & tissue image success")
         
-        del portal_tissue_colored
-        gc.collect()  # 強制執行垃圾回收
+#         del portal_tissue_colored
+#         gc.collect()  # 強制執行垃圾回收
         
-        portal_only_colored = self.color_map(img, portal_only_map)
-        cv2.imwrite(result_p + '_portal_only.png', portal_only_colored)    
-        print("print portal only image success")
+#         portal_only_colored = self.color_map(img, portal_only_map)
+#         cv2.imwrite(result_p + '_portal_only.png', portal_only_colored)    
+#         print("print portal only image success")
 
         
         return 0
@@ -409,7 +381,6 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--output_type", type=str, default="polygon")
     parser.add_argument("--model_dir", type=str, required=True)
-    parser.add_argument("--immune_model_dir", type=str, required=True)
     parser.add_argument("--output_dir", type=str, required=True)
     args = parser.parse_args()
 
