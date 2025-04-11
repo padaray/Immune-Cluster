@@ -41,12 +41,21 @@ def filter_binary_maps(immune_map_path, portal_map_path):
 # ------------------ Extract Points ------------------
 def extract_white_regions(binary_map):
     contours, _ = cv2.findContours(binary_map, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    points = np.array([pt[0] for contour in contours for pt in contour])
-    print(f"Total number of points in white regions: {len(points)}")
+    centers = []
+
+    for contour in contours:
+        M = cv2.moments(contour)
+        if M["m00"] != 0:
+            cx = int(M["m10"] / M["m00"])
+            cy = int(M["m01"] / M["m00"])
+            centers.append([cx, cy])
+
+    points = np.array(centers)
+    print(f"Total number of immune cells (center points): {len(points)}")
     return points
 
 # ------------------ DBSCAN ------------------
-def apply_dbscan_clustering(points, eps=30, min_samples=40):
+def apply_dbscan_clustering(points, eps=120, min_samples=10): #(50, 10)
     if len(points) == 0:
         return np.array([]), np.array([])
     dbscan = DBSCAN(eps=eps, min_samples=min_samples)
@@ -59,10 +68,11 @@ def apply_heatmap_overlay(original_image, heatmap):
     overlay = cv2.addWeighted(original_image, 0.6, heatmap_colored, 0.4, 0)
     return overlay
 
-# ------------------ Generate Heatmap amd Boxes ------------------
+# ------------------ Generate Heatmap and Boxes ------------------
 def generate_heatmap_and_boxes(points, labels, image_shape, original_image, output_path, wsi_path,
                                 density_threshold, filtered_map, micrometer_per_pixel):
     def inner_generate():
+        
         # 1. 計算密度圖
         desired_bin_count = 180
         height, width = image_shape
@@ -126,7 +136,75 @@ def generate_heatmap_and_boxes(points, labels, image_shape, original_image, outp
 
     monitor_memory(inner_generate, "generate_heatmap_and_boxes")
 
+    
+# ------------------ Draw Boxes from DBSCAN Clusters ------------------
+def generate_boxes_from_dbscan_clusters(points, labels, original_image, filtered_map, output_path, wsi_path, micrometer_per_pixel):
+    def inner_generate():
+        overlay_image = original_image.copy()
+        cluster_info = []
 
+        unique_labels = set(labels)
+        for cluster_id in unique_labels:
+            if cluster_id == -1:
+                continue  # skip noise
+
+            cluster_points = points[labels == cluster_id]
+
+
+            # 用橢圓形擬合並放大
+            ellipse = cv2.fitEllipse(cluster_points.astype(np.int32))
+            (center_x, center_y), (MA, ma), angle = ellipse
+
+            # 放大橢圓比例
+            scale_factor = 1.3
+            MA_enlarged = MA * scale_factor
+            ma_enlarged = ma * scale_factor
+            ellipse_enlarged = ((center_x, center_y), (MA_enlarged, ma_enlarged), angle)
+
+            # 畫放大的橢圓
+            cv2.ellipse(overlay_image, ellipse_enlarged, (255, 0, 0), 4)
+
+            # 建立橢圓 mask
+            mask = np.zeros_like(filtered_map, dtype=np.uint8)
+            cv2.ellipse(mask, ellipse_enlarged, color=1, thickness=-1)
+
+            # AND 運算取得橢圓內免疫像素
+            immune_pixel_count = cv2.countNonZero(cv2.bitwise_and(filtered_map, filtered_map, mask=mask))
+            immune_area_um2 = immune_pixel_count * (micrometer_per_pixel ** 2)
+
+            # 取放大橢圓的外接矩形作為 cluster info 顯示
+            x = int(center_x - MA_enlarged / 2)
+            y = int(center_y - ma_enlarged / 2)
+            w = int(MA_enlarged)
+            h = int(ma_enlarged)
+
+            # 標出免疫細胞紅點
+            for (px, py) in cluster_points:
+                cv2.circle(overlay_image, (int(px), int(py)), radius=2, color=(0, 0, 255), thickness=-1)
+
+            # 儲存群聚資訊
+            cluster_info.append({
+                "cluster_id": cluster_id,
+                "bounding_box": [x, y, w, h],
+                "immune_pixels": immune_pixel_count,
+                "immune_area_um2": immune_area_um2
+            })
+
+        # 儲存疊圖
+        box_filename = os.path.join(output_path, f"{os.path.basename(wsi_path).split('.')[0]}_dbscan_boxes_with_points.png")
+        overlay_image = cv2.cvtColor(overlay_image, cv2.COLOR_BGR2RGB)
+        cv2.imwrite(box_filename, overlay_image)
+        print("DBSCAN Box overlay with immune cell dots saved to", box_filename)
+
+        # 印出每群聚資訊
+        print("\n===== DBSCAN Cluster Summary =====")
+        for info in cluster_info:
+            print(f"Cluster {info['cluster_id']} | BBox: {info['bounding_box']} | Immune Pixels: {info['immune_pixels']} | Area: {info['immune_area_um2']:.2f} μm²")
+
+    monitor_memory(inner_generate, "generate_boxes_from_dbscan_clusters")
+
+
+    
 # ------------------ Draw Centers (Optional) ------------------
 def generate_filtered_overlay(original_image, filtered_map, output_path, wsi_path, suffix="filtered"):
     def inner_generate():
@@ -166,8 +244,12 @@ if __name__ == "__main__":
     original_image = np.array(slide.get_thumbnail((filtered_map.shape[1], filtered_map.shape[0])))
 
     # 熱力圖和框出高密度圖
-    generate_heatmap_and_boxes(points, labels, filtered_map.shape, original_image,
-                           args.output_path, args.wsi_path, args.density_thresh, filtered_map, args.mpp)
+#     generate_heatmap_and_boxes(points, labels, filtered_map.shape, original_image,
+#                            args.output_path, args.wsi_path, args.density_thresh, filtered_map, args.mpp)
+
+    # 框出滿足 DBSCAN 演算法區域
+    generate_boxes_from_dbscan_clusters(points, labels, original_image, filtered_map, args.output_path, args.wsi_path, args.mpp)
+
 
     # 選用：畫上免疫細胞中心點
     # generate_filtered_overlay(original_image, filtered_map, args.output_path, args.wsi_path, "filtered")
