@@ -75,7 +75,6 @@ def get_patch_wsi_level(wsi_path:str, patch_wsi_mag):
     wsi_reader = WSI_Reader(wsi_path)
     mag_dict = wsi_reader.get_mag_dict()
     patch_wsi_level = list(mag_dict.keys())[list(mag_dict.values()).index(patch_wsi_mag)]
-    print("Magnification-to-Level Dict:", mag_dict)
     
     return int(patch_wsi_level)
 
@@ -273,6 +272,7 @@ def gen_pkl(args, non_liver_tissue_mask):
     print(f"這是最終確認的 level : {level}")
     try:
         slide = pyvips.Image.new_from_file(args.wsi_path, level=level)
+        print(f"📐 讀取 WSI 大小為： x={slide.width}, y={slide.height}")
     except:
         slide = pyvips.Image.new_from_file(args.wsi_path, page=level)
     patch_info_list = []

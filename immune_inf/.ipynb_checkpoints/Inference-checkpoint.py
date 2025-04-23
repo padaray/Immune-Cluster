@@ -67,8 +67,6 @@ def postprocess(img, patch_x, patch_y, masks_pred, level):
     
     ############# 回傳用的座標和 mask #############
     useful_mask = (all_cells_mask > .5).astype(np.uint8) * 255
-#     patch_x_1 = int(patch_x * pow(2, level))
-#     patch_y_1 = int(patch_y * pow(2, level))
     ##############################################
 
     
@@ -94,7 +92,6 @@ def postprocess(img, patch_x, patch_y, masks_pred, level):
     if args.save_mask:
         os.makedirs(f"{args.inference_dir}/MASK/" +\
                     f"{wsi_case}/", exist_ok=True)
-        # print(args.save_mask)
         cv2.imwrite(f"{args.inference_dir}/MASK/" +\
                     f"{wsi_case}/{wsi_case}_{int(patch_x)}_{int(patch_y)}.png", 
                     mask)
@@ -143,13 +140,6 @@ def save2json(annotation_list, inference_dir, version, wsi_case):
          
     return result_json_path
 
-def extract_white_regions(binary_map):
-    contours, _ = cv2.findContours(binary_map, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    points = np.array([pt[0] for contour in contours for pt in contour])
-    print(f"Total number of points in white regions: {len(points)}")
-    return points
-
-
 def predict_mask_process(mask):
     mask = torch.sigmoid(mask)
     binary_mask = torch.where(mask > 0.5, 1.0, 0.0)
@@ -171,7 +161,6 @@ def forward_step(model, imgs, device):
     return masks_pred
 
 
-# +
 if __name__ == "__main__":
     # 1. Initital Setting=======================================================
     torch.manual_seed(0)
@@ -182,19 +171,9 @@ if __name__ == "__main__":
     except:
         level = 0
         
-    ############################################################################
+    print(f"Inference 免疫細胞 實際使用的level = {level}")
+    
     slide_os = openslide.OpenSlide(args.wsi_path)
-
-    if "aperio.AppMag" in slide_os.properties:
-        base_mag = float(slide_os.properties["aperio.AppMag"])
-    else:
-        base_mag = 40.0
-
-    downsample = slide_os.level_downsamples[level]
-    actual_patch_mag = base_mag / downsample
-
-    print(f"🧭 實際使用的 patch level = {level}，對應實際倍率 ≈ {actual_patch_mag:.2f}x")
-    ############################################################################
         
     data_params = {
         'wsi_path':     args.wsi_path,
@@ -202,7 +181,7 @@ if __name__ == "__main__":
         'patch_size':   args.patch_size,
         'batch_size':   args.batch_size,
         'level':        level,
-    }     
+    }
 
     num_class = args.num_class
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -222,12 +201,11 @@ if __name__ == "__main__":
 
     model.to(device)
     
-    # 讀取 WSI 原始大小
-    slide = pyvips.Image.new_from_file(args.wsi_path)
-    wsi_width, wsi_height = slide.width, slide.height
-
-    # 初始化完整 WSI mask
-    global_mask = np.zeros((wsi_height, wsi_width), dtype=np.uint8)
+    # 使用 pyvips 讀取 level 2 尺寸 for global mask
+    slide = pyvips.Image.new_from_file(args.wsi_path, level=2)
+    w2, h2 = slide.width, slide.height
+    global_mask = np.zeros((h2, w2), dtype=np.uint8)
+    print(f"global_mask width: {w2}, height: {h2}")
 
     if args.inference_dir != None:
         os.makedirs(args.inference_dir, exist_ok=True)
@@ -282,23 +260,18 @@ if __name__ == "__main__":
                 results = e.map(postprocess, imgs, patch_x, patch_y, masks_preds, repeat(level))
                 for annos, updated_mask, useful_mask, patch_x, patch_y in results:
                     cell_annos_results.append(annos)
-                    global_mask[patch_y:patch_y+args.patch_size, patch_x:patch_x+args.patch_size] = useful_mask
                     
-    # 儲存完整 WSI mask
-#     H2, W2 = global_mask.shape[0] // 4, global_mask.shape[1] // 4
-#     global_mask = cv2.resize(global_mask, (W2, H2), interpolation=cv2.INTER_NEAREST)
-#     global_mask = (global_mask > 0).astype(np.uint8) * 255
-    
-#     save_filename = f"{os.path.basename(args.wsi_path).split('.')[0]}_immune_binary.png"
-#     save_binary_path = os.path.join(args.inference_dir, save_filename)
-#     cv2.imwrite(save_binary_path, global_mask)
+                    # Resize mask 貼回 global_mask
+                    resized_mask = cv2.resize(useful_mask, (args.patch_size // 2, args.patch_size // 2), interpolation=cv2.INTER_NEAREST)
+                    resized_mask = (resized_mask > 0).astype(np.uint8) * 255
 
-#     print(f"Immune binary image save success!\n圖片大小: {global_mask.shape}")
+                    # Level 2 對應座標
+                    px_lv2 = int(patch_x) // 4
+                    py_lv2 = int(patch_y) // 4
+                        
+                    # 貼入畫布時裁切不超出邊界的部分
+                    global_mask[py_lv2:py_lv2+valid_h, px_lv2:px_lv2+valid_w] = resized_mask[:valid_h, :valid_w]
 
-    level_used = 2
-    w, h = slide_os.level_dimensions[level_used]
-    global_mask = cv2.resize(global_mask, (w, h), interpolation=cv2.INTER_NEAREST)
-    global_mask = (global_mask > 0).astype(np.uint8) * 255
 
     save_filename = f"{os.path.basename(args.wsi_path).split('.')[0]}_immune_binary.png"
     save_binary_path = os.path.join(args.inference_dir, save_filename)
@@ -310,10 +283,8 @@ if __name__ == "__main__":
     # ==========================================================================
     
     # 5. 疊加 global_mask_resized 到原圖縮圖 ====================
-    print("Generating overlay on WSI at 10x resolution...")
-
-    print(f"[INFO] Level 2 WSI 原始大小: width={w}, height={h}")
-    
+    level_used = 2
+    w, h = slide_os.level_dimensions[level_used]
     wsi_level_img = slide_os.read_region((0, 0), level_used, (w, h)).convert("RGB")
     wsi_level_np = np.array(wsi_level_img)
     wsi_level_np = cv2.cvtColor(wsi_level_np, cv2.COLOR_RGB2BGR)
@@ -323,8 +294,12 @@ if __name__ == "__main__":
 
     red_mask = np.zeros_like(wsi_level_np)
     red_mask[global_mask == 255] = [0, 0, 255]
-
-    overlay_result = cv2.addWeighted(wsi_level_np, 0.6, red_mask, 0.4, 0)
+    
+    # 僅針對 mask 區域做疊圖，其他區域保持原樣
+    overlay_result = wsi_level_np.copy()
+    mask_area = global_mask == 255
+    overlay_result[mask_area] = cv2.addWeighted(wsi_level_np[mask_area], 0.2, red_mask[mask_area], 0.8, 0)
+    
     overlay_out_path = os.path.join(args.inference_dir, f"{os.path.basename(args.wsi_path).split('.')[0]}_immune_overlay_lvl{level_used}.png")
     cv2.imwrite(overlay_out_path, overlay_result)
     print(f"Overlay image save success!\n圖片大小: {overlay_result.shape}")

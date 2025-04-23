@@ -24,7 +24,6 @@ class immune_cell_dataset(Dataset):
         
         # The post fix of the wsi file
         postfix = self.wsi_path.split('.')[-1]
-#         print(f"Postfix: {postfix}")
     
         if(postfix == "mrxs"):
             self.slide = pyvips.Image.new_from_file(data_params['wsi_path'], level=data_params['level'])
@@ -101,9 +100,6 @@ class immune_cell_patch_dataset(Dataset):
 
         if self.transform is not None:
             img = self.transform(img)
-            
-        # print(f"img shape: {img.shape}")
-        # print(f"img_path: {img_path}")
 
         return img, img_path
 
