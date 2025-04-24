@@ -33,6 +33,7 @@ $ pip install git+https://github.com/qubvel/segmentation_models.pytorch
 
 #### 1. preprocess.py
 功能：切割 Whole Slide Image (WSI) 成 patch，並去除非肝臟區域，最後轉成 pkl 檔
+註：pkl 檔案內儲存的是 WSI-level 1 下有組織的座標
 | 參數名稱  | 說明 |
 | ------------- | ------------- |
 | wsi_path  | Inference 的 WSI 路徑 |
@@ -41,7 +42,7 @@ $ pip install git+https://github.com/qubvel/segmentation_models.pytorch
 | patch_saving_dir  | 切好後的 patch 儲存路徑  |
 
 #### 2. inf_portal+tissue.py
-功能：Inference Portal 區域，印出 WSI 大小的 Mask 圖(20x)。
+功能：Inference Portal 區域，印出 WSI 大小的 Mask 圖(10x)。
 | 參數名稱  | 說明 |
 | ------------- | ------------- |
 | wsi_path  | Inference 的 WSI 路徑 |
@@ -50,7 +51,7 @@ $ pip install git+https://github.com/qubvel/segmentation_models.pytorch
 
 
 #### 3. Inference.py
-功能：Inference Immune，印出 WSI 大小的 Mask 圖(20x)。
+功能：Inference Immune，印出 WSI 大小的 Mask 圖(10x)。
 | 參數名稱  | 說明 |
 | ------------- | ------------- |
 | wsi_path  | Inference 的 WSI 路徑 |
